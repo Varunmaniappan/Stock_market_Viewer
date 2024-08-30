@@ -4,8 +4,9 @@ import axios from 'axios';
 import { 
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
   TextField, Button, Grid2, Typography, Switch, FormControlLabel, useMediaQuery,
-  CssBaseline, Container
+  CssBaseline, Container, IconButton
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -20,7 +21,7 @@ function App() {
   const [symbol, setSymbol] = useState('');
   const [startDate, setStartDate] = useState(dayjs().subtract(1, 'month'));
   const [endDate, setEndDate] = useState(dayjs());
-  const [chartData, setChartData] = useState([]);
+  const [chartData, setChartData] = useState({});
   const [darkMode, setDarkMode] = useState(true);
 
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
@@ -41,6 +42,8 @@ function App() {
     [darkMode]
   );
 
+  const colors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#a4de6c'];
+
   const fetchStockData = async () => {
     try {
       const response = await axios.get(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${API_KEY}`);
@@ -54,27 +57,54 @@ function App() {
           })
           .map(([date, values]) => ({
             date,
-            price: parseFloat(values['4. close'])
+            [symbol]: parseFloat(values['4. close']),
+            [`${symbol}_volume`]: parseInt(values['5. volume'])
           }))
           .reverse();
 
-        setChartData(filteredData);
+        setChartData(prevChartData => {
+          const newChartData = { ...prevChartData };
+          filteredData.forEach(item => {
+            if (newChartData[item.date]) {
+              newChartData[item.date] = { ...newChartData[item.date], ...item };
+            } else {
+              newChartData[item.date] = item;
+            }
+          });
+          return newChartData;
+        });
 
         const latestData = filteredData[filteredData.length - 1];
         const earliestData = filteredData[0];
-        const change = latestData.price - earliestData.price;
-        const changePercent = (change / earliestData.price) * 100;
+        const change = latestData[symbol] - earliestData[symbol];
+        const changePercent = (change / earliestData[symbol]) * 100;
 
-        setStocks([{
-          symbol,
-          price: latestData.price.toFixed(2),
-          change: change.toFixed(2),
-          changePercent: changePercent.toFixed(2) + '%'
-        }]);
+        setStocks(prevStocks => [
+          ...prevStocks.filter(stock => stock.symbol !== symbol),
+          {
+            symbol,
+            price: latestData[symbol].toFixed(2),
+            change: change.toFixed(2),
+            changePercent: changePercent.toFixed(2) + '%',
+            volume: latestData[`${symbol}_volume`]
+          }
+        ]);
       }
     } catch (error) {
       console.error('Error fetching stock data:', error);
     }
+  };
+
+  const removeStock = (symbolToRemove) => {
+    setStocks(prevStocks => prevStocks.filter(stock => stock.symbol !== symbolToRemove));
+    setChartData(prevChartData => {
+      const newChartData = { ...prevChartData };
+      Object.keys(newChartData).forEach(date => {
+        delete newChartData[date][symbolToRemove];
+        delete newChartData[date][`${symbolToRemove}_volume`];
+      });
+      return newChartData;
+    });
   };
 
   return (
@@ -123,25 +153,44 @@ function App() {
             </Grid2>
             <Grid2 item xs={12} sm={3}>
               <Button variant="contained" onClick={fetchStockData} fullWidth>
-                Fetch Stock Data
+                Add Stock Data
               </Button>
             </Grid2>
           </Grid2>
 
-          {chartData.length > 0 && (
+          {Object.keys(chartData).length > 0 && (
             <Paper elevation={3} style={{ padding: '20px', marginBottom: '20px' }}>
               <Typography variant="h5" gutterBottom>
                 Stock Price Chart
               </Typography>
               <div style={{ height: '400px' }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
+                  <LineChart data={Object.values(chartData)}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" />
-                    <YAxis />
+                    <YAxis yAxisId="left" />
+                    <YAxis yAxisId="right" orientation="right" />
                     <Tooltip />
                     <Legend />
-                    <Line type="monotone" dataKey="price" stroke={theme.palette.primary.main} />
+                    {stocks.map((stock, index) => (
+                      <Line 
+                        key={stock.symbol}
+                        type="monotone"
+                        dataKey={stock.symbol}
+                        stroke={colors[index % colors.length]}
+                        yAxisId="left"
+                      />
+                    ))}
+                    {stocks.map((stock, index) => (
+                      <Line 
+                        key={`${stock.symbol}_volume`}
+                        type="monotone"
+                        dataKey={`${stock.symbol}_volume`}
+                        stroke={colors[(index + 2) % colors.length]}
+                        yAxisId="right"
+                        dot={false}
+                      />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -156,6 +205,8 @@ function App() {
                   <TableCell>Price</TableCell>
                   <TableCell>Change</TableCell>
                   <TableCell>Change Percent</TableCell>
+                  <TableCell>Volume</TableCell>
+                  <TableCell>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -165,6 +216,12 @@ function App() {
                     <TableCell>{stock.price}</TableCell>
                     <TableCell>{stock.change}</TableCell>
                     <TableCell>{stock.changePercent}</TableCell>
+                    <TableCell>{stock.volume}</TableCell>
+                    <TableCell>
+                      <IconButton onClick={() => removeStock(stock.symbol)}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
